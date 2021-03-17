@@ -37,6 +37,7 @@ public class Constants {
     public static final String PROP_ACCOUNT = "account";
     public static final String PROP_ENC_PRIVKEY = "encPrivKey";
     public static final String PROP_PUBKEY = "pubKey";
+    public static final String PROP_ECKEY_PUB = "ecKeyPub";
     public static final String PROP_LEDGER = "ledger";
     public static final String PROP_API_PORT = "apiPort";    
     public static final String PROP_API_CORS_ALLOW_ORIGIN = "apiCORSAllowOrigin";    

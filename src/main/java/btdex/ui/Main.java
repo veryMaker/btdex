@@ -2,7 +2,6 @@ package btdex.ui;
 
 import static btdex.locale.Translation.tr;
 
-import java.awt.AWTException;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -11,24 +10,16 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Image;
-import java.awt.MouseInfo;
-import java.awt.PopupMenu;
-import java.awt.TrayIcon;
-import java.awt.TrayIcon.MessageType;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.security.SecureRandom;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Properties;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -40,7 +31,6 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JTabbedPane;
-import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -51,8 +41,11 @@ import javax.swing.event.ChangeListener;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.binance.dex.api.client.domain.Balance;
 import com.bulenkov.darcula.DarculaLaf;
 
+import bt.BT;
+import btdex.core.BinanceNode;
 import btdex.core.BurstNode;
 import btdex.core.Constants;
 import btdex.core.ContractState;
@@ -64,13 +57,9 @@ import btdex.locale.Translation;
 import btdex.sc.SellContract;
 import btdex.ui.orderbook.MarketPanel;
 import btdex.ui.orderbook.TokenMarketPanel;
-import signumj.entity.SignumAddress;
-import signumj.entity.response.Account;
-import signumj.entity.response.Block;
-import signumj.entity.response.http.BRSError;
-import dorkbox.systemTray.MenuItem;
-import dorkbox.systemTray.SystemTray;
-import dorkbox.util.OS;
+import burst.kit.entity.response.Account;
+import burst.kit.entity.response.Block;
+import burst.kit.entity.response.http.BRSError;
 import io.github.novacrypto.bip39.MnemonicGenerator;
 import io.github.novacrypto.bip39.Words;
 import io.github.novacrypto.bip39.wordlists.English;
@@ -82,7 +71,7 @@ import okhttp3.Response;
 public class Main extends JFrame implements ActionListener {
 
 	private static final long serialVersionUID = 1L;
-	
+
 	private Image icon, iconMono;
 	private Icon ICON_CONNECTED, ICON_DISCONNECTED, ICON_TESTNET;
 	private PulsingIcon pulsingButton;
@@ -99,25 +88,27 @@ public class Main extends JFrame implements ActionListener {
 	private JButton nodeSelector, explorerSelector;
 
 	private ExplorerWrapper explorer;
-	private ExplorerButton copyAddButton;
+	private ExplorerWrapper bnbExplorer;
+	private ExplorerButton copyAddressButton;
+	private ExplorerButton copyAddressButtonBinance;
 
 	private JLabel balanceLabel;
 	private JLabel lockedBalanceLabel;
 	private JButton sendButton;
 
+	private JLabel balanceLabelBinance;
+	private JLabel lockedBalanceLabelBinance;
+	private JButton sendButtonBinance;
+
 	private long lastUpdated;
 
 	private JButton signoutButton;
+	private String version = "dev";
 	private Icons i;
 
 	private JButton resetPinButton;
 
 	private Logger logger = LogManager.getLogger();
-
-	private MiningPanel miningPanel;
-
-	private SystemTray systemTray;
-	private TrayIcon windowsTrayIcon;
 
 	private static Main instance;
 
@@ -136,24 +127,7 @@ public class Main extends JFrame implements ActionListener {
 
 	public Main() {
 		super("BTDEX" + (Globals.getInstance().isTestnet() ? "-TESTNET" : ""));
-		
-		setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        addWindowListener(new WindowAdapter() {
-            public void windowClosing(WindowEvent ev) {
-            	if(windowsTrayIcon != null) {
-            		windowsTrayIcon.displayMessage(getTitle() + " " + Globals.getInstance().getVersion(), tr("tray_running"), MessageType.INFO);
-            	}
-            	if(windowsTrayIcon != null || systemTray != null) {
-            		Toast.makeText(Main.this, tr("tray_running"), Toast.Style.SUCCESS).display(MouseInfo.getPointerInfo().getLocation());
-            		Main.this.setVisible(false);
-            	}
-            	else {
-		        	if(miningPanel != null)
-		        		miningPanel.stop();
-		            System.exit(0);
-            	}
-            }
-        });
+		this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
 		instance = this;
 
@@ -168,8 +142,6 @@ public class Main extends JFrame implements ActionListener {
 
 		Translation.setLanguage(g.getLanguage());
 
-		addSystemTray();
-		
 		tabbedPane = new JTabbedPane();
 		tabbedPane.setOpaque(true);
 		tabbedPane.addChangeListener(new ChangeListener() {
@@ -233,19 +205,27 @@ public class Main extends JFrame implements ActionListener {
 		ICON_TESTNET = i.get(Icons.TESTNET);
 		ICON_DISCONNECTED = i.get(Icons.DISCONNECTED);
 
-		copyAddButton = new ExplorerButton("", i.get(Icons.COPY), i.get(Icons.EXPLORER));
-		copyAddButton.getMainButton().setFont(largeFont);
+		copyAddressButton = new ExplorerButton("", i.get(Icons.COPY), i.get(Icons.EXPLORER));
+		copyAddressButton.getMainButton().setFont(largeFont);
+
+		copyAddressButtonBinance = new ExplorerButton("", i.get(Icons.COPY), i.get(Icons.EXPLORER));
+		copyAddressButtonBinance.getMainButton().setFont(largeFont);
+		copyAddressButtonBinance.setBinance(true);
 
 		sendButton = new JButton(i.get(Icons.SEND));
-		sendButton.setToolTipText(tr("main_send", Constants.BURST_TICKER));
+		sendButton.setToolTipText(tr("main_send", "BURST"));
 		sendButton.addActionListener(this);
+
+		sendButtonBinance = new JButton(i.get(Icons.SEND));
+		sendButtonBinance.setToolTipText(tr("main_send", "BNB"));
+		sendButtonBinance.addActionListener(this);
 
 		content.add(tabbedPane, BorderLayout.CENTER);
 		tabbedPane.setFont(largeFont);
 
 		tabbedPane.addTab(tr("main_swaps"), i.get(Icons.SWAPS), orderBookToken);
 		tabbedPane.addTab(tr("main_contracts"), i.get(Icons.CROSS_CHAIN), orderBook);
-		tabbedPane.addTab(tr("main_mining"), i.get(Icons.MINING), miningPanel = new MiningPanel());
+		tabbedPane.addTab(tr("main_mining"), i.get(Icons.MINING), new MiningPanel());
 
 		boolean isMediator = g.getAddress()!=null && g.getMediators().isMediator(g.getAddress().getSignedLongId());
 
@@ -256,21 +236,30 @@ public class Main extends JFrame implements ActionListener {
 
 		tabbedPane.addTab(tr("main_transactions"), i.get(Icons.TRANSACTION), transactionsPanel);
 		
-		top.add(new Desc(tr("main_your_burst_address"), copyAddButton));
+		top.add(new Desc(tr("main_your_address", "BURST"), copyAddressButton));
 
-		balanceLabel = new JLabel(NumberFormatting.BURST.format(0));
+		balanceLabel = new JLabel("0.00");
 		balanceLabel.setToolTipText(tr("main_available_balance"));
 		balanceLabel.setFont(largeFont);
 		lockedBalanceLabel = new JLabel(tr("main_plus_locked", NumberFormatting.BURST.format(0)));
 		lockedBalanceLabel.setToolTipText(tr("main_amount_locked"));
-		top.add(new Desc(tr("main_balance", Constants.BURST_TICKER), balanceLabel, lockedBalanceLabel));
+		top.add(new Desc(tr("main_balance", "BURST"), balanceLabel, lockedBalanceLabel));
 		top.add(new Desc("  ", sendButton));
 
+		top.add(new Desc(tr("main_your_address", "Binance Chain"), copyAddressButtonBinance));
+		
+		balanceLabelBinance = new JLabel("0.00");
+		balanceLabelBinance.setToolTipText(tr("main_available_balance"));
+		balanceLabelBinance.setFont(largeFont);
+		lockedBalanceLabelBinance = new JLabel(tr("main_plus_locked", NumberFormatting.BURST.format(0)));
+		lockedBalanceLabelBinance.setToolTipText(tr("main_amount_locked"));
+		top.add(new Desc(tr("main_balance", "BNB"), balanceLabelBinance, lockedBalanceLabelBinance));
+		top.add(new Desc("  ", sendButtonBinance));
+		
 		topRight.add(new Desc("  ", createSettingsButton(largeFont)));
 		topRight.add(new Desc("  ", resetPinButton));
 		topRight.add(new Desc("  ", signoutButton));
 		topRight.add(new Desc(tr("main_language_name"), createLangButton(largeFont, g)));
-		topRight.add(new Desc("  ", createQuitButton()));
 
 		nodeSelector = new JButton(g.getNode());
 		nodeSelector.setToolTipText(tr("main_select_node"));
@@ -309,14 +298,23 @@ public class Main extends JFrame implements ActionListener {
 
 			resetPinButton.setVisible(!g.usingLedger());
 		}
-		copyAddButton.getMainButton().setText(printAddress(g.getAddress()));
-		copyAddButton.setAddress(g.getAddress().getID(), g.getAddress().getFullAddress());
+		String rawAddress = g.getAddress().getRawAddress();
+		rawAddress = rawAddress.substring(0, 4) + "..." + rawAddress.substring(15);
+		copyAddressButton.getMainButton().setText(rawAddress);
+		copyAddressButton.setAddress(g.getAddress().getID(), g.getAddress().getFullAddress());
+		
+		String bnbAddress = g.getBinanceAddress();
+		copyAddressButtonBinance.setAddress(bnbAddress, bnbAddress);
+		bnbAddress = bnbAddress.substring(0, 5) + "..." + bnbAddress.substring(bnbAddress.length()-5);
+		copyAddressButtonBinance.getMainButton().setText(bnbAddress);
+		// Fire the node updating thread
+		BinanceNode.getInstance();
 
 		// check if this is a known account
 		setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
 		boolean newAccount = false;
 		try {
-			Account address = g.getNS().getAccount(g.getAddress()).blockingGet();
+			Account address = g.getNS().getAccount(g.getAddress(), null, null).blockingGet();
 			logger.info("Active address {}", address.getId().getFullAddress());
 		}
 		catch (Exception e) {
@@ -327,7 +325,7 @@ public class Main extends JFrame implements ActionListener {
 					newAccount = true;
 					
 					// the copy will use the extended address if a new account, just to be sure
-					copyAddButton.setAddress(g.getAddress().getID(), g.getAddress().getExtendedAddress());
+					copyAddressButton.setAddress(g.getAddress().getID(), g.getAddress().getExtendedAddress());
 					
 					// unknown account
 					/* TODO: think about this auto-activation thing
@@ -340,7 +338,7 @@ public class Main extends JFrame implements ActionListener {
 						// try to activate this account
 						setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
 						try {
-							Response response = g.activate("btdex-" + g.getVersion());
+							Response response = g.activate();
 							if(response.isSuccessful()) {
 								Toast.makeText(this, tr("main_account_activate"), Toast.Style.SUCCESS).display();
 								tabbedPane.setSelectedComponent(transactionsPanel);
@@ -393,6 +391,11 @@ public class Main extends JFrame implements ActionListener {
 			icon = Icons.getIcon();
 			setIconImage(icon);
 			iconMono = Icons.getIconMono();
+
+			Properties versionProp = new Properties();
+			versionProp.load(Main.class.getResourceAsStream("/version.properties"));
+			version = versionProp.getProperty("version");
+			logger.info("Local resources, Version {}", version);
 		} catch (Exception ex) {
 			logger.error("Error in reading local resources :" + ex.getLocalizedMessage());
 			ex.printStackTrace();
@@ -412,66 +415,9 @@ public class Main extends JFrame implements ActionListener {
 			e.printStackTrace();
 		}
 	}
-	
-	@SuppressWarnings("serial")
-	private void addSystemTray() {
-		logger.debug("adding to system tray");
-		Action showHideAction = new AbstractAction(tr("tray_show_hide")) {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				Main.this.setVisible(!Main.this.isVisible());
-			}
-		};
-		Action quitAction = new AbstractAction(tr("tray_quit")) {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				doQuit();
-			}
-		};
-		
-		ArrayList<Action> actions = new ArrayList<>();
-		actions.add(showHideAction);
-		actions.add(quitAction);
-		Globals g = Globals.getInstance();
-				
-		if(OS.isWindows()) {
-			if(java.awt.SystemTray.isSupported()) {
-				java.awt.SystemTray sysTray = java.awt.SystemTray.getSystemTray();
-				PopupMenu popup = new PopupMenu();
-
-				for (Action a : actions) {
-					java.awt.MenuItem awtItem = new java.awt.MenuItem(a.getValue(Action.NAME).toString());
-					awtItem.addActionListener(a);
-					popup.add(awtItem);
-				}
-
-				windowsTrayIcon = new TrayIcon(icon, getTitle());
-				windowsTrayIcon.setImageAutoSize(true);
-				windowsTrayIcon.setPopupMenu(popup);
-				try {
-					sysTray.add(windowsTrayIcon);
-					windowsTrayIcon.displayMessage(getTitle() + " " + g.getVersion(), tr("tray_running"), MessageType.INFO);
-				} catch (AWTException e1) {
-					e1.printStackTrace();
-				}
-			}
-		}
-		else {
-			systemTray = SystemTray.get();
-			if(systemTray != null) {
-				systemTray.setImage(icon);
-				systemTray.setTooltip(getTitle());
-				systemTray.setStatus(getTitle() + " " + g.getVersion());
-
-				for (Action a : actions) {
-					systemTray.getMenu().add(new MenuItem(a.getValue(Action.NAME).toString(), a));
-				}
-			}
-		}
-	}
 
 	private JButton createVersionButton() {
-		JButton versionButton = new JButton(Globals.getInstance().getVersion(), i.get(Icons.VERSION));
+		JButton versionButton = new JButton(version, i.get(Icons.VERSION));
 		versionButton.setToolTipText(tr("main_check_new_release"));
 		versionButton.setVerticalAlignment(SwingConstants.CENTER);
 		versionButton.addActionListener(new ActionListener() {
@@ -578,15 +524,12 @@ public class Main extends JFrame implements ActionListener {
 				logger.debug("Lang Button clicked");
 				JPopupMenu menu = new JPopupMenu();
 				for(Locale l : Translation.getSupportedLanguages()) {
-					String country = l.getDisplayCountry(Translation.getCurrentLocale());
-					JMenuItem item = new JMenuItem(l.getDisplayLanguage(Translation.getCurrentLocale())
-							+ (country.length() > 0 ? "-" + country : ""));
+					JMenuItem item = new JMenuItem(l.getDisplayLanguage(Translation.getCurrentLocale()));
 					item.addActionListener(new ActionListener() {
 						@Override
 						public void actionPerformed(ActionEvent e) {
 							logger.debug("Language selected");
-							String country = l.getCountry();
-							g.setLanguage(l.getLanguage() + (country.length() > 0 ? "-" + country : ""));
+							g.setLanguage(l.getLanguage());
 							try {
 								g.saveConfs();
 							} catch (Exception e1) {
@@ -604,34 +547,6 @@ public class Main extends JFrame implements ActionListener {
 			}
 		});
 		return langButton;
-	}
-	
-	public static String printAddress(SignumAddress address) {
-		String fullAddress = address.getFullAddress();
-		return fullAddress;
-		//return fullAddress.substring(0, 4) + "..." + fullAddress.substring(19);
-		//return fullAddress.substring(0, 6) + "..." + fullAddress.substring(17);
-	}
-	
-	private void doQuit() {
-		if(miningPanel != null)
-    		miningPanel.stop();
-		if(systemTray != null) {
-			systemTray.shutdown();				
-		}
-		if(windowsTrayIcon != null) {
-			java.awt.SystemTray.getSystemTray().remove(windowsTrayIcon);
-		}
-        System.exit(0);
-	}
-
-	private JButton createQuitButton() {
-		JButton quitButton = new JButton(i.get(Icons.QUIT));
-		quitButton.setToolTipText(tr("tray_quit"));
-		quitButton.addActionListener(e -> {
-			doQuit();
-		});
-		return quitButton;
 	}
 
 	/**
@@ -662,27 +577,9 @@ public class Main extends JFrame implements ActionListener {
 			}
 			if(mediationPanel!=null && mediationPanel.isVisible())
 				mediationPanel.update();
-			if(miningPanel != null) {
-				if(miningPanel.isVisible() || showingSplash) {
-					miningPanel.update();
-				}
-			}
 
 			nodeSelector.setIcon(g.isTestnet() ? ICON_TESTNET : ICON_CONNECTED);
 			nodeSelector.setBackground(explorerSelector.getBackground());
-
-			String nodeAddress = g.getNS().getAddress();
-			if(!nodeSelector.getText().equals(nodeAddress)) {
-				// if the best node changed
-				nodeSelector.setText(nodeAddress);
-				g.setNode(true, nodeAddress);
-				try {
-					g.saveConfs();
-				} catch (Exception ex) {
-					ex.printStackTrace();
-					Toast.makeText(this, ex.getMessage(), Toast.Style.ERROR).display();
-				}
-			}
 
 			Exception nodeException = bn.getNodeException();
 			if(nodeException != null) {
@@ -740,7 +637,7 @@ public class Main extends JFrame implements ActionListener {
 				return;
 			
 			// the copy will use the short address if we have a valid account
-			copyAddButton.setAddress(g.getAddress().getID(), g.getAddress().getFullAddress());
+			copyAddressButton.setAddress(g.getAddress().getID(), g.getAddress().getFullAddress());
 			
 			balance = ac.getBalance().longValue();
 			// Locked value in *market* and possibly other Burst coin stuff.
@@ -779,6 +676,16 @@ public class Main extends JFrame implements ActionListener {
 				statusLabel.setText(tr("main_node_not_sync"));
 				nodeSelector.setBackground(Color.RED);
 			}
+			
+			if(g.getBinanceAddress() != null) {
+				BinanceNode binanceNode = BinanceNode.getInstance();
+				
+				Balance bnbBal = binanceNode.getAssetBalance("BNB");
+				if(bnbBal != null) {
+					balanceLabelBinance.setText(bnbBal.getFree());
+					lockedBalanceLabelBinance.setText(tr("main_plus_locked", bnbBal.getLocked()));
+				}
+			}
 		}
 		catch (RuntimeException rex) {
 			rex.printStackTrace();
@@ -801,10 +708,10 @@ public class Main extends JFrame implements ActionListener {
 		if(e.getSource() == signoutButton) {
 			Globals g = Globals.getInstance();
 			String response = JOptionPane.showInputDialog(this,
-					tr(g.usingLedger() ? "main_exit_message_ledger" : "main_exit_message", g.getAddress().getFullAddress()),
+					tr(g.usingLedger() ? "main_exit_message_ledger" : "main_exit_message", g.getAddress().getRawAddress()),
 					tr("main_exit"), JOptionPane.OK_CANCEL_OPTION);
 			if(response != null) {
-				String strAddress = g.getAddress().getFullAddress();
+				String strAddress = g.getAddress().getRawAddress();
 				if(!response.equalsIgnoreCase(strAddress.substring(strAddress.length()-5))) {
 					Toast.makeText(this, tr("main_exit_error"), Toast.Style.ERROR).display();
 					return;
@@ -827,27 +734,18 @@ public class Main extends JFrame implements ActionListener {
 		else if (e.getSource() == nodeSelector) {
 
 			Globals g = Globals.getInstance();
-			String customNode = "";
-			if(!g.isNodeAutomatic())
-				customNode = g.getNode();
 
-			JTextField customNodeField = new JTextField(20);
-			customNodeField.setText(customNode);
-			JPanel customNodePanel = new JPanel(new BorderLayout());
-			customNodePanel.add(new JLabel(tr("main_select_node_text")), BorderLayout.PAGE_START);
-			customNodePanel.add(customNodeField, BorderLayout.PAGE_END);
-			int ret = JOptionPane.showConfirmDialog(this, customNodePanel, tr("main_select_node"), JOptionPane.OK_CANCEL_OPTION);
+			String[] list = {BT.NODE_BURSTCOIN_RO, BT.NODE_BURST_TEAM, Constants.NODE_LOCALHOST};
+			if(g.isTestnet()){
+				list = new String[]{Constants.NODE_TESTNET, BT.NODE_LOCAL_TESTNET };
+			}
+
+			JComboBox<String> nodeComboBox = new JComboBox<String>(list);
+			nodeComboBox.setEditable(true);
+			int ret = JOptionPane.showConfirmDialog(this, nodeComboBox, tr("main_select_node"), JOptionPane.OK_CANCEL_OPTION);
 
 			if(ret == JOptionPane.OK_OPTION) {
-				customNode = customNodeField.getText().trim();
-				if(customNode.length() > 0) {
-					g.setNode(false, customNode);
-				}
-				else {
-					if(g.isNodeAutomatic())
-						return;
-					g.setNode(true, g.getNS().getAddress());
-				}
+				g.setNode(nodeComboBox.getSelectedItem().toString());
 				try {
 					g.saveConfs();
 				} catch (Exception ex) {
@@ -855,9 +753,8 @@ public class Main extends JFrame implements ActionListener {
 					Toast.makeText(this, ex.getMessage(), Toast.Style.ERROR).display();
 				}
 
-				JOptionPane.showMessageDialog(Main.this,
-						tr("main_restart_to_apply_changes"), tr("main_select_node"),
-						JOptionPane.OK_OPTION);
+				nodeSelector.setText(g.getNode());
+				update();
 			}
 		}
 

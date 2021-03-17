@@ -1,29 +1,26 @@
 package btdex.core;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Properties;
 
+import com.binance.dex.api.client.BinanceDexEnvironment;
+import com.binance.dex.api.client.Wallet;
+import com.binance.dex.api.client.encoding.Crypto;
 import com.google.gson.JsonObject;
 
 import bt.BT;
 import btdex.api.Server;
 import btdex.markets.MarketBurstToken;
 import btdex.ui.ExplorerWrapper;
-import dorkbox.util.OS;
-import signumj.crypto.SignumCrypto;
-import signumj.entity.SignumAddress;
-import signumj.service.NodeService;
-import signumj.service.impl.UseBestNodeService;
-import signumj.util.SignumUtils;
+import burst.kit.crypto.BurstCrypto;
+import burst.kit.entity.BurstAddress;
+import burst.kit.service.BurstNodeService;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -35,11 +32,12 @@ import org.apache.logging.log4j.core.appender.ConsoleAppender;
 import org.apache.logging.log4j.core.config.Configurator;
 import org.apache.logging.log4j.core.config.builder.api.*;
 import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
+import org.bitcoinj.core.ECKey;
 
 public class Globals {
 
-	private NodeService NS;
-	public static final SignumCrypto BC = SignumCrypto.getInstance();
+	private BurstNodeService NS;
+	public static final BurstCrypto BC = BurstCrypto.getInstance();
 
 	static String confFile = Constants.DEF_CONF_FILE;
 	private Properties conf = new Properties();
@@ -50,9 +48,9 @@ public class Globals {
 
 	private boolean ledgerEnabled = false;
 	private boolean testnet = false;
-	private SignumAddress address;
+	private BurstAddress address;
+	private String bnbAddress;
 	private int ledgerIndex;
-	private String version = "dev";
 
 	private Mediators mediators;
 
@@ -71,34 +69,8 @@ public class Globals {
 		try {
 			// Read properties from file
 			File f = new File(confFile);
-			if(confFile == Constants.DEF_CONF_FILE && (!f.exists() || !f.isFile())) {
-				// the default config file does not exist on the same folder, let's go to a user-wide location
-				String confFolder = System.getProperty("user.home") + File.separatorChar + ".config";
-				if(OS.isWindows()) {
-					confFolder = System.getenv("APPDATA");
-					ProcessBuilder builder = new ProcessBuilder(new String[]{"cmd", "/C echo %APPDATA%"});
-
-				    BufferedReader br = null;
-				    try {
-				        Process start = builder.start();
-				        br = new BufferedReader(new InputStreamReader(start.getInputStream()));
-				        String path = br.readLine();
-				        // In case we get a trailing "
-				        if(path.endsWith("\"")){
-				            path = path.substring(0, path.length()-1);
-				        }
-				        confFolder = path.trim();
-				    } catch (Exception ex) {
-				        logger.log(Level.ERROR, "Could not get the Application Data Folder", ex);
-				    }
-				}
-				f = new File(confFolder + File.separatorChar + "btdex" , Constants.DEF_CONF_FILE);
-				setConfFile(f.getAbsolutePath());
-			}
-			System.out.println("Using config file " + f.getAbsolutePath());
 			if (f.exists() && f.isFile()) {
 				try {
-					System.out.println("Loading config file contents");
 					FileInputStream input = new FileInputStream(confFile);
 					conf.load(input);
 				}
@@ -114,30 +86,8 @@ public class Globals {
 			
 			logger.info("Using properties file {}", confFile);
 			testnet = Boolean.parseBoolean(conf.getProperty(Constants.PROP_TESTNET, "false"));
-			
-			String nodeAutomatic = conf.getProperty(Constants.PROP_NODE_AUTO, "true");
-			String nodeAddress = conf.getProperty(Constants.PROP_NODE, "");
-			ArrayList<String> nodeList = new ArrayList<>();
-			if(nodeAddress.length() > 0) {
-				// the stored node always goes to the list as first
-				nodeList.add(nodeAddress);
-			}
-			if("true".equals(nodeAutomatic)) {
-				nodeList.addAll(Arrays.asList(isTestnet() ? Constants.NODE_LIST_TESTNET : Constants.NODE_LIST));
-			}
-			
-			setNodeList(nodeList);
+			setNode(conf.getProperty(Constants.PROP_NODE, isTestnet() ? Constants.NODE_TESTNET : BT.NODE_BURSTCOIN_RO));
 			BT.activateCIP20(true);
-			
-			SignumUtils.setAddressPrefix(isTestnet() ? "TS" : "S");
-			SignumUtils.addAddressPrefix("BURST");
-			SignumUtils.setValueSuffix("SIGNA");
-			
-			// Read the version
-			Properties versionProp = new Properties();
-			versionProp.load(Globals.class.getResourceAsStream("/version.properties"));
-			version = versionProp.getProperty("version");
-			logger.info("Local resources, Version {}", version);
 
 			// possible ledger account index
 			ledgerEnabled = Boolean.parseBoolean(conf.getProperty(Constants.PROP_LEDGER_ENABLED, "false"));
@@ -156,18 +106,13 @@ public class Globals {
 			loadAccounts();
 			
 			int apiPort = Integer.parseInt(conf.getProperty(Constants.PROP_API_PORT, "-1"));
-			String allowOrign = conf.getProperty(Constants.PROP_API_CORS_ALLOW_ORIGIN, "*");
 			if(apiPort > 0) {
-				new Server(apiPort, allowOrign);
+				new Server(apiPort);
 			}
 		}
 		catch (Exception e) {
 			e.printStackTrace();
 		}
-	}
-	
-	public String getVersion() {
-		return version;
 	}
 
 	public boolean isLedgerEnabled() {
@@ -200,8 +145,15 @@ public class Globals {
 		}
 		else {
 			byte[] publicKey = BC.parseHexString(publicKeyStr);
-			address = BC.getAddressFromPublic(publicKey);
+			address = BC.getBurstAddressFromPublic(publicKey);
 			logger.debug("checkPublicKey() sets address to {}", address.getFullAddress());
+			
+			String ecKeyPubStr = conf.getProperty(Constants.PROP_ECKEY_PUB);
+			if(ecKeyPubStr != null) {
+				ECKey ecKey = ECKey.fromPublicOnly(BC.parseHexString(ecKeyPubStr));
+				bnbAddress = Crypto.getAddressFromECKey(ecKey, isTestnet() ? BinanceDexEnvironment.TEST_NET.getHrp() :
+					BinanceDexEnvironment.PROD.getHrp());
+			}
 		}
 	}
 
@@ -234,7 +186,7 @@ public class Globals {
 		conf.setProperty(Constants.PROP_LEDGER, Integer.toString(index));
 		this.ledgerIndex = index;
 
-		address = BC.getAddressFromPublic(pubKey);
+		address = BC.getBurstAddressFromPublic(pubKey);
 		logger.debug("Ledger keys set. Address from pubKey {}", address.getFullAddress());
 	}
 
@@ -244,9 +196,15 @@ public class Globals {
 
 		conf.setProperty(Constants.PROP_PUBKEY, Globals.BC.toHexString(pubKey));
 		conf.setProperty(Constants.PROP_ENC_PRIVKEY, Globals.BC.toHexString(encPrivKey));
-
-		address = BC.getAddressFromPublic(pubKey);
-		logger.debug("Ledger keys set. Address from pubKey {}", address.getFullAddress());
+		
+		address = BC.getBurstAddressFromPublic(pubKey);
+		logger.debug("Keys set. for address {}", address.getFullAddress());
+		
+		Wallet bnbWallet = new Wallet(BC.toHexString(privKey), isTestnet() ?
+				BinanceDexEnvironment.TEST_NET : BinanceDexEnvironment.PROD);
+		conf.setProperty(Constants.PROP_ECKEY_PUB, bnbWallet.getEcKey().getPublicKeyAsHex());
+		bnbAddress = bnbWallet.getAddress();
+		logger.debug("Keys set. for address {}", bnbAddress);
 	}
 
 	/**
@@ -396,8 +354,6 @@ public class Globals {
 	}
 
 	public void addUserMarket(Market m, boolean save) {
-		if(m.getTicker() == null)
-			return;
 		Markets.addUserMarket(m);
 		if(save)
 			saveUserMarkets();
@@ -407,31 +363,25 @@ public class Globals {
 		accounts.add(ac);
 		saveAccounts();
 	}
-	
-	public long getMinOffer(long id) {
-		Market m = Markets.findMarket(id);
-		long minOffer = Long.parseLong(conf.getProperty(Constants.PROP_MIN_OFFER + m.getTicker(), "0"));
-		
-		if(minOffer==0) {
-			return m.getDefaultMinOffer();
-		}
-		return minOffer;
-	}
 
 	public void removeAccount(int index) {
 		accounts.remove(index);
 		saveAccounts();
 	}
 
-	public SignumAddress getAddress() {
+	public BurstAddress getAddress() {
 		return address;
+	}
+	
+	public String getBinanceAddress() {
+		return bnbAddress;
 	}
 
 	public byte[] getPubKey() {
 		return BC.parseHexString(conf.getProperty(Constants.PROP_PUBKEY));
 	}
 
-	public NodeService getNS() {
+	public BurstNodeService getNS() {
 		return NS;
 	}
 
@@ -443,46 +393,26 @@ public class Globals {
 		return conf.getProperty(Constants.PROP_LANG);
 	}
 
-	public void setNodeList(List<String> nodeList) {
-		List<NodeService> nsList = new ArrayList<NodeService>();
-		for (String nodeAddress : nodeList) {
-			nsList.add(NodeService.getInstance(nodeAddress, "btdex-" + version));
-		}
-		NS = new UseBestNodeService(true, nsList);
-	}
-	
-	public void setNode(boolean automatic, String node) {
-		conf.setProperty(Constants.PROP_NODE, node);		
-		conf.setProperty(Constants.PROP_NODE_AUTO, Boolean.toString(automatic));
-	}
-	
-	public boolean isNodeAutomatic() {
-		return "true".equals(conf.getProperty(Constants.PROP_NODE_AUTO, "true"));
-	}
-	
-	public void setProperty(String key, String value) {
-		conf.setProperty(key, value);
-	}
+	public void setNode(String node) {
+		conf.setProperty(Constants.PROP_NODE, node);
 
-	public String getProperty(String key) {
-		return conf.getProperty(key);
+		NS = BurstNodeService.getInstance(node);
 	}
 
 	public String getExplorer() {
-		return conf.getProperty(Constants.PROP_EXPLORER, ExplorerWrapper.SIGNUM_NETWORK);
+		return conf.getProperty(Constants.PROP_EXPLORER, ExplorerWrapper.BURSTCOIN_NETWORK);
 	}
 
 	public void setExplorer(String value) {
 		conf.setProperty(Constants.PROP_EXPLORER, value);
 	}
 
-	public Response activate(String ref) throws IOException {
+	public Response activate() throws IOException {
 		OkHttpClient client = new OkHttpClient();
 
 		JsonObject params = new JsonObject();
 		params.addProperty("account", getAddress().getID());
 		params.addProperty("publickey", BC.toHexString(getPubKey()));
-		params.addProperty("ref", ref);
 		
 		RequestBody body = RequestBody.create(params.toString(), Constants.JSON);
 

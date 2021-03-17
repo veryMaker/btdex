@@ -45,6 +45,13 @@ public class ExplorerWrapper {
 		return new ExplorerWrapper(SIGNUMCOIN_RO, "https://explorer.signumcoin.ro",
 				"/account/", "/transaction/", "/asset/");
 	}
+	
+	public static ExplorerWrapper binanceExplorer() {
+		String baseURL = Globals.getInstance().isTestnet() ?
+				"https://testnet-explorer.binance.org" : "https://explorer.binance.org";
+		return new ExplorerWrapper(BURSTCOIN_NETWORK, baseURL,
+				"/address/", "/tx/", "/");
+	}
 
 //	public static ExplorerWrapper burstScanNet() {
 //		String baseURL = Globals.getInstance().isTestnet() ?

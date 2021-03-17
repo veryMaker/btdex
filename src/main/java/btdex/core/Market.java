@@ -8,7 +8,7 @@ import javax.swing.JTextField;
 
 import com.google.gson.JsonObject;
 
-import signumj.entity.SignumID;
+import burst.kit.entity.BurstID;
 
 
 public abstract class Market {
@@ -26,11 +26,7 @@ public abstract class Market {
 	public static long MARKET_DOGE           = 0x000000005;
 	public static long MARKET_ARRR           = 0x000000006;
 	public static long MARKET_XLA            = 0x000000007;
-	public static long MARKET_BCH            = 0x000000008;
-	public static long MARKET_BSV            = 0x000000009;
-	public static long MARKET_BNB            = 0x000000010;
-
-	public static long MARKET_XCH            = 0x000000060;
+	public static long MARKET_BNB            = 0x000000008;
 
 	// TODO: fill with other cryptos here
 
@@ -55,7 +51,7 @@ public abstract class Market {
 	 *
 	 * @return the BURST token ID or null if not a token.
 	 */
-	public SignumID getTokenID() {
+	public BurstID getTokenID() {
 		return null;
 	}
 
@@ -100,10 +96,6 @@ public abstract class Market {
 	 */
 	public long getFactor() {
 		return BTC_TO_SAT;
-	}
-	
-	public long getDefaultMinOffer() {
-		return 0;
 	}
 
 	/**
