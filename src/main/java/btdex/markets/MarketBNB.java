@@ -29,10 +29,10 @@ public class MarketBNB extends MarketCrypto {
 		
 		String addr = fields.get(ADDRESS);
 		
-		if(!addr.startsWith(Globals.getInstance().isTestnet() ? "tbnb1" : "bnb1")) {
-			throw new Exception(Translation.tr("mkt_invalid_address", addr, toString()));
-		}
 		try {
+			if(!addr.startsWith(Globals.getInstance().isTestnet() ? "tbnb1" : "bnb1")) {
+				throw new Exception();
+			}
 			Crypto.decodeAddress(addr);
 		}
 		catch (Exception e) {
